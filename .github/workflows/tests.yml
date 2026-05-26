@@ -40,8 +40,20 @@ jobs:
           composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
           composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
-      - name: Check syntax
-        run: find src -name "*.php" -exec php -l {} \; | grep -v "No syntax"
+      - name: Check PHP syntax
+        run: |
+          ERRORS=0
+          for file in $(find src -name "*.php"); do
+            php -l "$file"
+            if [ $? -ne 0 ]; then
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ $ERRORS -gt 0 ]; then
+            echo "Found $ERRORS file(s) with syntax errors"
+            exit 1
+          fi
+          echo "All PHP files passed syntax check"
 
-      - name: List package structure
+      - name: Show package structure
         run: find src -name "*.php" | sort
