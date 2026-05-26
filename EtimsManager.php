@@ -6,28 +6,38 @@ namespace Flavytech\Etims\Services;
 
 use Flavytech\Etims\Contracts\EtimsClientContract;
 use Flavytech\Etims\Contracts\TenantResolverContract;
+use Flavytech\Etims\DTOs\BranchDTO;
+use Flavytech\Etims\DTOs\BranchResponseDTO;
+use Flavytech\Etims\DTOs\CreditNoteDTO;
+use Flavytech\Etims\DTOs\DebitNoteDTO;
 use Flavytech\Etims\DTOs\InvoiceDTO;
 use Flavytech\Etims\DTOs\InvoiceResponseDTO;
 use Flavytech\Etims\DTOs\PinValidationResponseDTO;
 use Flavytech\Etims\DTOs\StockItemDTO;
 use Flavytech\Etims\DTOs\StockMovementDTO;
 use Flavytech\Etims\DTOs\StockResponseDTO;
+use Flavytech\Etims\DTOs\WebhookPayloadDTO;
 use Flavytech\Etims\Events\InvoiceFailed;
 use Flavytech\Etims\Events\InvoiceQueued;
 use Flavytech\Etims\Events\InvoiceSubmitted;
-use Flavytech\Etims\Events\StockSynced;
-use Flavytech\Etims\Events\StockSyncFailed;
-use Flavytech\Etims\Events\StockMovementRecorded;
 use Flavytech\Etims\Events\StockMovementFailed;
+use Flavytech\Etims\Events\StockMovementRecorded;
+use Flavytech\Etims\Events\StockSyncFailed;
+use Flavytech\Etims\Events\StockSynced;
 use Flavytech\Etims\Exceptions\EtimsIdempotencyException;
+use Flavytech\Etims\Http\Webhooks\WebhookProcessor;
 use Flavytech\Etims\Jobs\RecordStockMovementJob;
 use Flavytech\Etims\Jobs\SubmitInvoiceJob;
 use Flavytech\Etims\Jobs\SyncStockJob;
+use Flavytech\Etims\Models\EtimsBranch;
 use Flavytech\Etims\Models\EtimsInvoice;
 use Flavytech\Etims\Models\EtimsStockItem;
 use Flavytech\Etims\Models\EtimsStockMovement;
+use Flavytech\Etims\Support\QrCodeGenerator;
+use Flavytech\Etims\Support\ThermalReceiptBuilder;
 use Flavytech\Etims\Testing\FakeEtimsClient;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -70,6 +80,7 @@ class EtimsManager
         private readonly Dispatcher $events,
         private readonly array $config,
         private readonly ?TenantResolverContract $tenantResolver = null,
+        private readonly ?WebhookProcessor $webhookProcessor = null,
     ) {}
 
     // =========================================================================
@@ -179,6 +190,214 @@ class EtimsManager
     public function validatePin(string $pin): PinValidationResponseDTO
     {
         return $this->resolveClient()->validatePin($pin);
+    }
+
+    // =========================================================================
+    // Phase 2 — Credit & Debit Notes
+    // =========================================================================
+
+    /**
+     * Submit a credit note synchronously.
+     *
+     * A credit note reverses or partially reverses a previously submitted invoice.
+     * Internally converts the CreditNoteDTO to an InvoiceDTO with type 'C'.
+     *
+     * Usage — Full reversal:
+     *   $credit = CreditNoteDTO::reversal($originalInvoice, 'Goods returned', 'CN-001');
+     *   $response = Etims::submitCreditNote($credit);
+     *
+     * @throws \Flavytech\Etims\Exceptions\EtimsApiException
+     */
+    public function submitCreditNote(CreditNoteDTO $creditNote): InvoiceResponseDTO
+    {
+        return $this->submitInvoice($creditNote->toInvoiceDTO());
+    }
+
+    /**
+     * Queue a credit note for async background submission.
+     */
+    public function queueCreditNote(CreditNoteDTO $creditNote): string
+    {
+        return $this->queueInvoice($creditNote->toInvoiceDTO());
+    }
+
+    /**
+     * Submit a debit note synchronously.
+     *
+     * A debit note increases the amount owed on a previously submitted invoice.
+     * Internally converts the DebitNoteDTO to an InvoiceDTO with type 'D'.
+     *
+     * @throws \Flavytech\Etims\Exceptions\EtimsApiException
+     */
+    public function submitDebitNote(DebitNoteDTO $debitNote): InvoiceResponseDTO
+    {
+        return $this->submitInvoice($debitNote->toInvoiceDTO());
+    }
+
+    /**
+     * Queue a debit note for async background submission.
+     */
+    public function queueDebitNote(DebitNoteDTO $debitNote): string
+    {
+        return $this->queueInvoice($debitNote->toInvoiceDTO());
+    }
+
+    // =========================================================================
+    // Phase 2 — Webhook Handling
+    // =========================================================================
+
+    /**
+     * Process an inbound webhook from KRA.
+     *
+     * Verifies the signature, parses the payload, updates audit records,
+     * and fires the appropriate Laravel events.
+     *
+     * Register the route in routes/api.php:
+     *   Route::post('/webhooks/etims', fn(Request $r) => Etims::handleWebhook($r));
+     *
+     * Or use the built-in controller:
+     *   Route::post('/webhooks/etims', EtimsWebhookController::class);
+     *
+     * @throws \Flavytech\Etims\Exceptions\EtimsException If signature verification fails
+     */
+    public function handleWebhook(Request $request): WebhookPayloadDTO
+    {
+        $processor = $this->webhookProcessor ?? new WebhookProcessor($this->events, $this->config);
+
+        return $processor->process($request);
+    }
+
+    // =========================================================================
+    // Phase 3 — Branch Management
+    // =========================================================================
+
+    /**
+     * Register or update a branch with KRA synchronously.
+     *
+     * @throws \Flavytech\Etims\Exceptions\EtimsApiException
+     */
+    public function saveBranch(BranchDTO $branch): BranchResponseDTO
+    {
+        $response = $this->resolveClient()->saveBranch($branch);
+
+        EtimsBranch::updateOrCreate(
+            ['branch_id' => $branch->branchId, 'tenant_id' => $this->currentTenantId()],
+            [
+                'branch_name'    => $branch->branchName,
+                'branch_address' => $branch->branchAddress,
+                'manager_name'   => $branch->managerName,
+                'phone'          => $branch->phone,
+                'email'          => $branch->email,
+                'status'         => $branch->isActive() ? 'active' : 'inactive',
+                'kra_status'     => $branch->status,
+                'payload'        => $branch->toKraPayload(),
+                'response'       => $response->toArray(),
+                'registered_at'  => $response->isSuccessful() ? now() : null,
+                'failure_reason' => $response->isSuccessful() ? null : $response->resultMessage,
+            ]
+        );
+
+        return $response;
+    }
+
+    /**
+     * Fetch all branches registered under the current PIN from KRA.
+     *
+     * @return BranchResponseDTO[]
+     * @throws \Flavytech\Etims\Exceptions\EtimsApiException
+     */
+    public function getBranches(): array
+    {
+        return $this->resolveClient()->getBranches();
+    }
+
+    /**
+     * Get locally stored branch records (from DB, without KRA API call).
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, EtimsBranch>
+     */
+    public function localBranches(): \Illuminate\Database\Eloquent\Collection
+    {
+        $query = EtimsBranch::query();
+
+        if ($tenantId = $this->currentTenantId()) {
+            $query->forTenant($tenantId);
+        }
+
+        return $query->orderBy('branch_id')->get();
+    }
+
+    // =========================================================================
+    // Phase 3 — QR Code Support
+    // =========================================================================
+
+    /**
+     * Generate a QR code SVG for a submitted invoice response.
+     *
+     * Returns an SVG string ready to embed in HTML or PDF.
+     *
+     * Usage:
+     *   $svg = Etims::generateQrCode($response);
+     *   // In Blade: {!! $svg !!}
+     *
+     * For better quality QR codes, install endroid/qr-code:
+     *   composer require endroid/qr-code
+     */
+    public function generateQrCode(InvoiceResponseDTO $response, int $size = 200): string
+    {
+        return (new QrCodeGenerator($size))
+            ->fromResponse($response)
+            ->toSvg();
+    }
+
+    /**
+     * Get the KRA verification URL for a submitted invoice.
+     *
+     * Use this when you want to embed a clickable link rather than a QR code.
+     */
+    public function getVerificationUrl(InvoiceResponseDTO $response): string
+    {
+        return (new QrCodeGenerator())
+            ->fromResponse($response)
+            ->toVerificationUrl();
+    }
+
+    /**
+     * Get a QrCodeGenerator instance for advanced QR customization.
+     *
+     * Usage:
+     *   Etims::qrCode($response)->size(300)->toDataUri();
+     */
+    public function qrCode(InvoiceResponseDTO $response): QrCodeGenerator
+    {
+        return (new QrCodeGenerator())->fromResponse($response);
+    }
+
+    // =========================================================================
+    // Phase 3 — Thermal Receipt Support
+    // =========================================================================
+
+    /**
+     * Build a KRA-compliant fiscal receipt for printing or display.
+     *
+     * Returns a ThermalReceiptBuilder you can chain to get HTML or ESC/POS output.
+     *
+     * Usage — HTML receipt:
+     *   $html = Etims::receipt($invoice, $response)
+     *       ->businessName('Acme Supermarket')
+     *       ->businessAddress('Tom Mboya St, Nairobi')
+     *       ->cashierName('Jane Wanjiru')
+     *       ->toHtml();
+     *
+     * Usage — Thermal printer (ESC/POS):
+     *   $bytes = Etims::receipt($invoice, $response)
+     *       ->businessName('Acme Supermarket')
+     *       ->toEscPos();
+     *   // Send $bytes to your printer socket
+     */
+    public function receipt(InvoiceDTO $invoice, InvoiceResponseDTO $response): ThermalReceiptBuilder
+    {
+        return ThermalReceiptBuilder::make($invoice, $response);
     }
 
     /**
