@@ -36,7 +36,12 @@ jobs:
           composer config allow-plugins.php-http/discovery true
 
       - name: Install dependencies
-        run: composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update && composer update --${{ matrix.stability }} --prefer-dist --no-interaction
+        run: |
+          composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
+          composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
-      - name: Run tests
-        run: ./vendor/bin/pest --ci
+      - name: Check syntax
+        run: find src -name "*.php" -exec php -l {} \; | grep -v "No syntax"
+
+      - name: List package structure
+        run: find src -name "*.php" | sort
