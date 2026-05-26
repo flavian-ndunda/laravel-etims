@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Flavytech\Etims\Testing;
 
 use Flavytech\Etims\Contracts\EtimsClientContract;
+use Flavytech\Etims\DTOs\BranchDTO;
+use Flavytech\Etims\DTOs\BranchResponseDTO;
 use Flavytech\Etims\DTOs\InvoiceDTO;
 use Flavytech\Etims\DTOs\InvoiceResponseDTO;
 use Flavytech\Etims\DTOs\PinValidationResponseDTO;
@@ -74,6 +76,9 @@ class FakeEtimsClient implements EtimsClientContract
 
     /** @var array<string, StockResponseDTO> Stubbed stock responses keyed by item_code */
     private array $stubbedStockResponses = [];
+
+    /** @var BranchDTO[] Branches saved, in order */
+    private array $savedBranches = [];
 
     /**
      * Simulate a specific failure on the next submission.
@@ -455,5 +460,52 @@ class FakeEtimsClient implements EtimsClientContract
                 'sdcDateTime' => now()->toIso8601String(),
             ],
         ]);
+    }
+
+    public function saveBranch(BranchDTO $branch): BranchResponseDTO
+    {
+        $this->savedBranches[] = $branch;
+
+        return BranchResponseDTO::fromKraResponse($branch->branchId, [
+            'resultCd'  => '000',
+            'resultMsg' => 'Branch saved successfully',
+            'data'      => [],
+        ]);
+    }
+
+    public function getBranches(): array
+    {
+        return array_map(fn(BranchDTO $b) => BranchResponseDTO::fromKraResponse($b->branchId, [
+            'resultCd'  => '000',
+            'resultMsg' => 'OK',
+            'data'      => [],
+        ]), $this->savedBranches);
+    }
+
+    // =========================================================================
+    // Branch Assertion Methods
+    // =========================================================================
+
+    public function assertBranchSaved(string $branchId): void
+    {
+        $ids = array_map(fn(BranchDTO $b) => $b->branchId, $this->savedBranches);
+
+        Assert::assertContains(
+            $branchId,
+            $ids,
+            "Expected branch [{$branchId}] to have been saved, but it was not. " .
+            'Saved: [' . implode(', ', $ids) . ']'
+        );
+    }
+
+    public function assertNoBranchesSaved(): void
+    {
+        Assert::assertEmpty($this->savedBranches, 'Expected no branches to be saved.');
+    }
+
+    /** @return BranchDTO[] */
+    public function savedBranches(): array
+    {
+        return $this->savedBranches;
     }
 }
