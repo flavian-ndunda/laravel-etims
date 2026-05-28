@@ -18,12 +18,28 @@
     "license": "MIT",
     "authors": [
         {
-            "name": "Flavytech",
-            "email": "dev@flavytech.com",
-            "homepage": "https://flavytech.com",
+            "name": "Flavian Ndunda",
+            "email": "flavianndunda@gmail.com",
+            "homepage": "https://flavytechsolutions.com",
             "role": "Developer"
         }
     ],
+{
+    "repositories": [
+        {
+            "type": "path",
+            "url": "C:/Users/flavi/OneDrive/Desktop/laravel etims sdk",
+            "options": {
+                "symlink": false
+            }
+        }
+    ],
+    "require": {
+        "flavytech/laravel-etims": "*",
+        ...
+    }
+}
+
     "require": {
         "php": "^8.3",
         "illuminate/support": "^11.0",
