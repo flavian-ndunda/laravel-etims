@@ -1,20 +1,9 @@
 {
     "name": "flavytech/laravel-etims",
-    "description": "Production-grade Laravel SDK for Kenya's KRA eTIMS / Gava Connect API. Handles invoice submission, queue-based sync, retries, multi-tenancy, and offline resilience.",
+    "description": "Production-grade Laravel SDK for Kenya's KRA eTIMS / Gava Connect API.",
     "type": "library",
-    "keywords": [
-        "laravel",
-        "etims",
-        "kra",
-        "kenya",
-        "gava-connect",
-        "invoice",
-        "tax",
-        "fiscal",
-        "pos",
-        "erp"
-    ],
-    "homepage": "https://github.com/flavytech/laravel-etims",
+    "keywords": ["laravel","etims","kra","kenya","gava-connect","invoice","tax","fiscal","pos","erp"],
+    "homepage": "https://github.com/flavian-ndunda/laravel-etims",
     "license": "MIT",
     "authors": [
         {
@@ -24,37 +13,21 @@
             "role": "Developer"
         }
     ],
-{
-    "repositories": [
-        {
-            "type": "path",
-            "url": "C:/Users/flavi/OneDrive/Desktop/laravel etims sdk",
-            "options": {
-                "symlink": false
-            }
-        }
-    ],
     "require": {
-        "flavytech/laravel-etims": "*",
-        ...
-    }
-}
-
-    "require": {
-        "php": "^8.3",
-        "illuminate/support": "^11.0",
-        "illuminate/http": "^11.0",
-        "illuminate/queue": "^11.0",
-        "illuminate/events": "^11.0",
-        "illuminate/database": "^11.0",
-        "illuminate/console": "^11.0",
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/http": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/queue": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/events": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/database": "^10.0|^11.0|^12.0|^13.0",
+        "illuminate/console": "^10.0|^11.0|^12.0|^13.0",
         "guzzlehttp/guzzle": "^7.8",
         "spatie/laravel-package-tools": "^1.16"
     },
     "require-dev": {
-        "orchestra/testbench": "^9.0",
-        "pestphp/pest": "^2.0",
-        "pestphp/pest-plugin-laravel": "^2.0",
+        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "pestphp/pest": "^2.0|^3.0",
+        "pestphp/pest-plugin-laravel": "^2.0|^3.0",
         "mockery/mockery": "^1.6",
         "larastan/larastan": "^2.9",
         "phpstan/phpstan": "^1.10",
@@ -72,7 +45,6 @@
     },
     "scripts": {
         "test": "./vendor/bin/pest",
-        "test-coverage": "./vendor/bin/pest --coverage",
         "analyse": "./vendor/bin/phpstan analyse",
         "format": "./vendor/bin/php-cs-fixer fix --allow-risky=yes"
     },
@@ -87,7 +59,11 @@
         }
     },
     "config": {
-        "sort-packages": true
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
     },
     "minimum-stability": "stable",
     "prefer-stable": true
